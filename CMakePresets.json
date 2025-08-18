@@ -1,0 +1,21 @@
+{
+    "version": 8,
+    "configurePresets": [
+        {
+            "name": "clang-debug",
+            "displayName": "Clang 18.1.8 x86_64-pc-linux-gnu",
+            "description": "Using compilers: C = clang, CXX = clang++",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build",
+            "cacheVariables": {
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": true,
+                "ENABLE_SANITIZERS": true,
+                "ENABLE_COMPILER_WARNINGS": true
+            }
+        }
+    ]
+}

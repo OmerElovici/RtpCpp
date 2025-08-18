@@ -1,0 +1,5 @@
+build/
+.cache/
+.vscode/
+
+tests/test.cpp
