@@ -1,4 +1,3 @@
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <ios>
@@ -50,7 +49,7 @@ struct PaddingBit {
 struct ExtensionBit {
     static constexpr std::size_t kOffset = 0;
     static constexpr std::uint8_t kMask = 0b0001'0000U;
-    static constexpr std::uint8_t kShift = 5U;
+    static constexpr std::uint8_t kShift = 4U;
 };
 
 struct CsrcCount {
@@ -162,13 +161,13 @@ bool RtpPacket::parse_pkt() noexcept {
 #endif
 
     //  sequrence number is 16 bits at offset 16 octet 2 and 3
-    sequence_number_ = read_big_endian<std::uint16_t>(&buffer_[SequenceNumber::kOffset]);
+    sequence_number_ = read_big_endian<decltype(sequence_number_)>(&buffer_[SequenceNumber::kOffset]);
 
     // timestamp is 32 bits at offset 32 octet: 4, 5, 6, 7,
-    timestamp_ = read_big_endian<std::uint32_t>(&buffer_[Timestamp::kOffset]);
+    timestamp_ = read_big_endian<decltype(timestamp_)>(&buffer_[Timestamp::kOffset]);
 
     // ssrc identifier is 32 bits at offset 64 octet: 8, 9 ,10 ,11
-    ssrc_ = read_big_endian<std::uint32_t>(&buffer_[Ssrc::kOffset]);
+    ssrc_ = read_big_endian<decltype(ssrc_)>(&buffer_[Ssrc::kOffset]);
 
     if (extension_bit_) {
         return parse_extension();
@@ -196,14 +195,19 @@ bool RtpPacket::parse_extension() noexcept {
     // const auto extension_offset = kFixedRTPSize + static_cast<std::size_t>(4 * csrc_count_);
     const std::size_t extension_offset = payload_offset_;
 
+    extension_header_ = ExtensionHeader{};
+
     // extension id is the first 16 bits of extension header.
-    extension_header_->id_ = (buffer_[extension_offset] << 8U) | buffer_[extension_offset + 1];
+    // extension_header_->id_ = (buffer_[extension_offset] << 8U) | buffer_[extension_offset + 1];
+    extension_header_->id_ =
+        read_big_endian<decltype(extension_header_->id_)>(&buffer_[extension_offset]);
 
     // extension data length is after the extension id. which is 2 bytes from
     // the offset.
     const std::size_t length_offset = extension_offset + 2;
 
-    extension_header_->length_ = ((buffer_[length_offset] << 8U) | buffer_[length_offset + 1]);
+    // extension_header_->length_ = ((buffer_[length_offset] << 8U) | buffer_[length_offset + 1]);
+    extension_header_->length_ = read_big_endian<decltype(extension_header_->length_)>(&buffer_[length_offset]);
 
     // TODO check if this check is working properly
     // Check if payload offset exceed the size of packet including fixed fields
@@ -360,7 +364,8 @@ void RtpPacket::extract_csrc() noexcept {
     std::size_t current_offset = kFixedRTPSize;
 
     for (std::size_t idx = 0; idx < csrc_count_; ++idx) {
-        csrc_[idx] = read_big_endian<std::uint32_t>(&buffer_[current_offset]);
+        using CsrcElementType = std::remove_cvref_t<decltype(csrc_[idx])>;
+        csrc_[idx] = read_big_endian<CsrcElementType>(&buffer_[current_offset]);
         current_offset += 4;
     }
 }
@@ -494,6 +499,35 @@ std::string RtpPacket::to_string() noexcept {
 
         for (std::size_t idx = 1; idx < payload.size(); ++idx) {
             oss << static_cast<unsigned>(payload[idx]);
+            if (idx == byte_end) {
+                line_end = idx + 8;
+                oss << "  ";
+            } else if (idx == line_end) {
+                byte_end = idx + 8;
+                oss << "\n";
+            } else {
+                oss << " ";
+            }
+        }
+        oss << "\n";
+    }
+
+    if (extension_bit_ && extension_header_) {
+        oss << "Extension Header ID: " << static_cast<unsigned>(extension_header_->id_) << "\n";
+        oss << "Extension Header Length: " << static_cast<unsigned>(extension_header_->length_)
+            << "\n";
+
+
+        oss << std::noshowbase << std::setw(2) << std::setfill('0');
+        auto& extension_data = extension_header_->data_;
+
+        oss << static_cast<unsigned>(extension_data[0]) << " ";
+
+        std::size_t byte_end = 7;
+        std::size_t line_end = 0;
+
+        for (std::size_t idx = 1; idx < extension_data.size(); ++idx) {
+            oss << static_cast<unsigned>(extension_data[idx]);
             if (idx == byte_end) {
                 line_end = idx + 8;
                 oss << "  ";
