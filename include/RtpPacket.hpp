@@ -7,9 +7,10 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <vector>
 
 
-//TODO add support for setting and modifying extension header.
+// TODO add support for setting and modifying extension header.
 
 namespace RtpCpp {
 
@@ -27,6 +28,8 @@ class RtpPacket {
     static constexpr std::uint8_t kRtpVersion = 2;
     using CsrcList = std::array<std::uint32_t, kMaxCsrcIds>;
     using PayloadView = std::span<std::uint8_t>;
+
+    static constexpr std::size_t kMaxFixedPktSize = kFixedRTPSize + (kMaxCsrcIds * 4);
 
 public:
     RtpPacket() noexcept = default;
@@ -63,7 +66,7 @@ public:
     // Setters
 
     void set_padding_bytes(std::uint8_t padding_bytes) noexcept;
-    void set_extension_header(ExtensionHeader& extension_header) noexcept; // TODO
+    void set_extension_header(ExtensionHeader& extension_header) noexcept;
     void set_marker(bool mark) noexcept;
     void set_csrc(std::span<std::uint32_t> csrc_list) noexcept;
     void set_csrc_count(std::uint8_t count) noexcept;
@@ -86,13 +89,30 @@ public:
 private:
     [[nodiscard]] bool parse_pkt() noexcept;
     [[nodiscard]] bool parse_extension() noexcept;
+    [[nodiscard]] std::size_t csrc_list_size() const { return csrc_count_ * kCsrcIdsize; }
     void move_to_owned_buffer() {
         if (!is_owning_buffer_) {
             std::memcpy(owned_buff_.data(), buffer_.data(), buffer_.size_bytes());
+            std::size_t csrc_bytes_size = csrc_list_size();
+            std::memcpy(
+                &owned_buff_[owned_buffer_offset_ - csrc_bytes_size],
+                buffer_.data(),
+                buffer_.size_bytes());
+            payload_offset_ = headroom_;
+
+            if (extension_header_) {
+                // length is in 32 bits. header length and id fields are 16 bits each.
+                payload_offset_ += static_cast<std::size_t>(extension_header_->length_) * 4 + 4;
+            }
+
             is_owning_buffer_ = true;
         }
     }
     void extract_csrc() noexcept;
+
+    static constexpr std::size_t kCsrcIdsize = 4;
+    static constexpr std::size_t kMaxCsrcIdsBytes = kCsrcIdsize * kMaxCsrcIds;
+
 
     // fixed header fields
     bool extension_bit_{};
@@ -115,9 +135,11 @@ private:
 
     std::array<std::uint8_t, 1500> owned_buff_{};
 
-    std::size_t max_csrc_count_{};
     bool is_owning_buffer_ = false;
-    std::size_t csrc_count_overlap_bytes_ = 0;
+
+    // std::vector<std::uint8_t> dyn_buffer_;
+    std::size_t owned_buffer_offset_ = kMaxCsrcIdsBytes;
+    std::size_t headroom_ = kFixedRTPSize + kMaxCsrcIdsBytes;
 };
 
 } // namespace RtpCpp

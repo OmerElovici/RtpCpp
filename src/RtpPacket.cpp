@@ -81,6 +81,7 @@ struct Ssrc {
     static constexpr std::size_t kOffset = 8;
 };
 
+
 [[nodiscard]] bool RtpPacket::parse(std::span<std::uint8_t> buffer) noexcept {
     reset();
     buffer_ = buffer;
@@ -89,6 +90,7 @@ struct Ssrc {
 
 [[nodiscard]] bool RtpPacket::parse(std::uint8_t* buffer, std::size_t size) noexcept {
     reset();
+
     buffer_ = {buffer, size};
     return parse_pkt();
 }
@@ -141,7 +143,7 @@ bool RtpPacket::parse_pkt() noexcept {
     // csrc count is 4 bits at offset 4 octet 0
     csrc_count_ = buffer_[CsrcCount::kOffset] & CsrcCount::kMask;
 
-    payload_offset_ += static_cast<std::size_t>(4 * csrc_count_);
+    payload_offset_ += static_cast<std::size_t>(csrc_list_size());
     if (payload_offset_ > buffer_.size()) {
         return false;
     }
@@ -161,7 +163,8 @@ bool RtpPacket::parse_pkt() noexcept {
 #endif
 
     //  sequrence number is 16 bits at offset 16 octet 2 and 3
-    sequence_number_ = read_big_endian<decltype(sequence_number_)>(&buffer_[SequenceNumber::kOffset]);
+    sequence_number_ =
+        read_big_endian<decltype(sequence_number_)>(&buffer_[SequenceNumber::kOffset]);
 
     // timestamp is 32 bits at offset 32 octet: 4, 5, 6, 7,
     timestamp_ = read_big_endian<decltype(timestamp_)>(&buffer_[Timestamp::kOffset]);
@@ -207,9 +210,9 @@ bool RtpPacket::parse_extension() noexcept {
     const std::size_t length_offset = extension_offset + 2;
 
     // extension_header_->length_ = ((buffer_[length_offset] << 8U) | buffer_[length_offset + 1]);
-    extension_header_->length_ = read_big_endian<decltype(extension_header_->length_)>(&buffer_[length_offset]);
+    extension_header_->length_ =
+        read_big_endian<decltype(extension_header_->length_)>(&buffer_[length_offset]);
 
-    // TODO check if this check is working properly
     // Check if payload offset exceed the size of packet including fixed fields
     // and padding.
     const int number_of_words = extension_header_->length_ * 4;
@@ -224,6 +227,8 @@ bool RtpPacket::parse_extension() noexcept {
     }
 
     extension_header_->data_ = buffer_.subspan(data_offset, number_of_words);
+
+    payload_size_ = buffer_.size() - payload_offset_ - static_cast<std::size_t>(padding_bytes_);
 
 
     return true;
@@ -271,7 +276,6 @@ std::uint8_t RtpPacket::get_padding_bytes() const noexcept {
     return padding_bytes_;
 }
 
-// TODO should it be view?
 std::optional<ExtensionHeader> RtpPacket::get_extension_header() const noexcept {
     return extension_header_;
 }
@@ -307,13 +311,6 @@ void RtpPacket::set_csrc_count(std::uint8_t count) noexcept {
         return;
     }
 
-    if (count < max_csrc_count_) {
-        csrc_count_overlap_bytes_ = 0;
-
-    } else {
-        csrc_count_overlap_bytes_ = count - csrc_count_;
-        max_csrc_count_ = count;
-    }
 
     csrc_count_ = count;
 
@@ -351,6 +348,9 @@ void RtpPacket::set_payload_size(std::size_t size) {
 
 
 RtpPacket::PayloadView RtpPacket::view_payload() noexcept {
+    if (is_owning_buffer_) {
+        return {&owned_buff_[payload_offset_], payload_size_};
+    }
     if (payload_offset_ < buffer_.size()) {
         return buffer_.subspan(payload_offset_, payload_size_);
     }
@@ -366,7 +366,7 @@ void RtpPacket::extract_csrc() noexcept {
     for (std::size_t idx = 0; idx < csrc_count_; ++idx) {
         using CsrcElementType = std::remove_cvref_t<decltype(csrc_[idx])>;
         csrc_[idx] = read_big_endian<CsrcElementType>(&buffer_[current_offset]);
-        current_offset += 4;
+        current_offset += kCsrcIdsize;
     }
 }
 
@@ -374,63 +374,67 @@ std::span<std::uint8_t> RtpPacket::serialize() {
     if (!is_owning_buffer_) {
         return buffer_;
     }
-    std::size_t overlapping_bytes = csrc_count_overlap_bytes_ * 4;
-    std::size_t packet_size =
-        payload_offset_ + payload_size_ + padding_bytes_ + csrc_count_overlap_bytes_ * 4;
+
+    std::size_t csrc_bytes = csrc_list_size();
+    auto fixed_header_offset = std::max(owned_buffer_offset_, csrc_bytes) - csrc_bytes;
+    std::span<std::uint8_t> fixed_header_view{&owned_buff_[fixed_header_offset], kFixedRTPSize};
+    std::size_t packet_end = payload_offset_ + payload_size_ + padding_bytes_;
+    std::size_t packet_size = (packet_end < fixed_header_offset)
+                                  ? (fixed_header_offset)
+                                  : (packet_end - fixed_header_offset);
+
+
+    // write version
+    fixed_header_view[Version::kOffset] &= static_cast<std::uint8_t>(~Version::kMask);
+    fixed_header_view[Version::kOffset] |=
+        (static_cast<std::uint8_t>(kRtpVersion) << Version::kShift) & Version::kMask;
 
     // write marking
-    owned_buff_[MarkerBit::kOffset] &= static_cast<std::uint8_t>(~MarkerBit::kMask);
-    owned_buff_[MarkerBit::kOffset] |=
+    fixed_header_view[MarkerBit::kOffset] &= static_cast<std::uint8_t>(~MarkerBit::kMask);
+    fixed_header_view[MarkerBit::kOffset] |=
         (static_cast<std::uint8_t>(marker_bit_) << MarkerBit::kShift) & MarkerBit::kMask;
 
     // write payload type
-    owned_buff_[PayloadType::kOffset] &= static_cast<std::uint8_t>(~PayloadType::kMask);
-    owned_buff_[PayloadType::kOffset] |= payload_type_;
+    fixed_header_view[PayloadType::kOffset] &= static_cast<std::uint8_t>(~PayloadType::kMask);
+    fixed_header_view[PayloadType::kOffset] |= payload_type_;
 
 
     // write csrc count
-    owned_buff_[CsrcCount::kOffset] |= csrc_count_ & CsrcCount::kMask;
+    fixed_header_view[CsrcCount::kOffset] |= csrc_count_ & CsrcCount::kMask;
 
-    // Make sure payload data is not overwritten from new data.
-    if (overlapping_bytes > 0) {
-        std::memmove(
-            &owned_buff_[payload_offset_ + overlapping_bytes],
-            &owned_buff_[payload_offset_],
-            payload_size_);
-        payload_offset_ += overlapping_bytes;
-
-        csrc_count_overlap_bytes_ = 0;
-    }
 
     // write csrc list
-    std::size_t current_csrc_offset = kFixedRTPSize;
+    std::size_t current_csrc_offset = kFixedRTPSize + fixed_header_offset;
     for (std::size_t idx = 0; idx < csrc_count_; ++idx) {
         std::uint32_t csrc = csrc_[idx];
         write_big_endian(&owned_buff_[current_csrc_offset], csrc);
-        current_csrc_offset += 4;
+        current_csrc_offset += kCsrcIdsize;
     }
+
 
     // write padding
     bool pad_flag = false;
     if (padding_bytes_ > 0) {
         pad_flag = true;
-        owned_buff_[packet_size - 1] = padding_bytes_;
+        owned_buff_[packet_end - 1] = padding_bytes_;
     }
-    owned_buff_[PaddingBit::kOffset] &= static_cast<std::uint8_t>(~PaddingBit::kMask);
-    owned_buff_[PaddingBit::kOffset] |=
+
+    fixed_header_view[PaddingBit::kOffset] &= static_cast<std::uint8_t>(~PaddingBit::kMask);
+    fixed_header_view[PaddingBit::kOffset] |=
         (static_cast<std::uint8_t>(pad_flag) << PaddingBit::kShift) & PaddingBit::kMask;
 
+
     // write sequence number
-    write_big_endian(&owned_buff_[SequenceNumber::kOffset], sequence_number_);
+    write_big_endian(&fixed_header_view[SequenceNumber::kOffset], sequence_number_);
 
     // write timestamp
-    write_big_endian(&owned_buff_[Timestamp::kOffset], timestamp_);
+    write_big_endian(&fixed_header_view[Timestamp::kOffset], timestamp_);
 
     // write ssrc
-    write_big_endian(&owned_buff_[Ssrc::kOffset], ssrc_);
+    write_big_endian(&fixed_header_view[Ssrc::kOffset], ssrc_);
 
 
-    return std::span<std::uint8_t>{owned_buff_.data(), packet_size};
+    return std::span<std::uint8_t>{&owned_buff_[fixed_header_offset], packet_size};
 }
 
 
@@ -448,6 +452,9 @@ void RtpPacket::reset() noexcept {
     payload_offset_ = kFixedRTPSize;
     payload_size_ = 0;
     buffer_ = {};
+
+    owned_buffer_offset_ = kMaxCsrcIdsBytes;
+    headroom_ = kFixedRTPSize + kMaxCsrcIdsBytes;
 }
 
 std::string RtpPacket::to_string() noexcept {
@@ -478,7 +485,7 @@ std::string RtpPacket::to_string() noexcept {
     oss << "  CSRC: [ ";
 
     if (csrc_count_ > 0) {
-        std::size_t last_csrc = csrc_count_;
+        std::size_t last_csrc = csrc_count_ - 1;
         for (std::size_t idx = 0; idx < last_csrc; ++idx) {
             oss << static_cast<unsigned>(csrc_[idx]) << ", ";
         }
