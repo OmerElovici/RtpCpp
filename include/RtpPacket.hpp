@@ -6,17 +6,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <span>
-#include <type_traits>
 #include <utility>
-#include <vector>
 #include "endianness.hpp"
 
 
 // TODO add support for setting and modifying extension header.
 namespace RtpCpp {
-
-
 
 
 template <typename C>
@@ -30,13 +27,17 @@ concept ResizableContiguousBuffer =
 struct ExtensionHeader {
     std::uint16_t id_{};
     std::uint16_t length_{};
-    std::span<std::uint8_t> data_;
 
-    [[nodiscard]] std::size_t size() const {
-        assert(static_cast<std::size_t>(length_ * 4) != data_.size_bytes());
 
-        return 4 + (length_ * 4);
+    void reset() {
+        id_ = 0;
+        length_ = 0;
     }
+
+    [[nodiscard]] std::size_t data_size_bytes() const {
+        return static_cast<std::size_t>(length_) * 4;
+    }
+    [[nodiscard]] std::size_t size_bytes() const { return 4 + data_size_bytes(); }
 };
 
 
@@ -65,6 +66,7 @@ private:
     // using ElementT = typename B::value_type;
     using CsrcList = std::array<std::uint32_t, kMaxCsrcIds>;
     using PayloadSpan = std::span<std::uint8_t>;
+    using ExtensionSpan = std::span<std::uint8_t>;
     using PacketBuffer = std::span<std::uint8_t>;
 
     struct Version {
@@ -114,9 +116,7 @@ private:
         static constexpr std::size_t kOffset = 8U;
     };
 
-
 public:
-
     RtpPacket()
         requires ResizableContiguousBuffer<B>
         : buffer_(kFixedRTPSize)
@@ -124,26 +124,26 @@ public:
     RtpPacket() = default;
 
 
-    [[nodiscard]] Result parse(const B& buffer)  {
+    [[nodiscard]] Result parse(const B& buffer) {
         buffer_ = buffer;
         on_parse(buffer_.size());
         return parse_pkt();
     }
 
-    [[nodiscard]] Result parse(B&& buffer)  {
+    [[nodiscard]] Result parse(B&& buffer) {
         buffer_ = std::move(buffer);
         on_parse(buffer_.size());
         return parse_pkt();
     }
 
-    [[nodiscard]] Result parse(B&& buffer, std::size_t packet_size)  {
+    [[nodiscard]] Result parse(B&& buffer, std::size_t packet_size) {
         buffer_ = std::move(buffer);
         on_parse(packet_size);
         return parse_pkt();
     }
 
-    
-    [[nodiscard]] Result parse(const B& buffer, std::size_t packet_size)  {
+
+    [[nodiscard]] Result parse(const B& buffer, std::size_t packet_size) {
         buffer_ = buffer;
         on_parse(packet_size);
         return parse_pkt();
@@ -160,7 +160,7 @@ public:
     }
 
 private:
-    [[nodiscard]] Result parse_pkt()  {
+    [[nodiscard]] Result parse_pkt() {
         // std::size_t buffer_size = buffer_bytes_size();
         if (packet_size_ < kFixedRTPSize) {
             return Result::kBufferTooSmall;
@@ -210,7 +210,7 @@ private:
         if (payload_offset_ > packet_size_) {
             return Result::kParseBufferOverflow;
         }
-        
+
         extract_csrc();
 
         // marker is the first bit at octet 0.
@@ -247,7 +247,7 @@ private:
     }
 
 
-    [[nodiscard]] Result parse_extension()  {
+    [[nodiscard]] Result parse_extension() {
         // extension start after csrc. each csrc is 32 bits (4 bytes) so we skip the
         // amount of csrc_count.
         extension_offset_ = payload_offset_;
@@ -281,14 +281,15 @@ private:
         }
 
         // extension_header_->data_ = buffer_.subspan(data_offset, number_of_words);
-        extension_header_.data_ = std::span<std::uint8_t>(&buffer_[data_offset], number_of_words);
+        // extension_header_.data_ = std::span<std::uint8_t>(&buffer_[data_offset],
+        // number_of_words);
 
         payload_size_ = packet_size_ - payload_offset_ - padding_bytes_;
 
 
         return Result::kSuccess;
     }
-    void extract_csrc()  {
+    void extract_csrc() {
         // csrc identifier is 32 bits at offset bit 96 octet: 12 with 4 bytes each.
         // the amount of identifiers is based on ccsrc_count.
         std::size_t current_offset = kFixedRTPSize;
@@ -331,8 +332,8 @@ public:
     // Setters
     Result set_padding_bytes(std::uint8_t padding_bytes) {
         if constexpr (ResizableContiguousBuffer<B>) {
-            const std::size_t updated_packet_size = packet_size_ - padding_bytes_ +
-            padding_bytes; if (updated_packet_size > buffer_.size()) {
+            const std::size_t updated_packet_size = packet_size_ - padding_bytes_ + padding_bytes;
+            if (updated_packet_size > buffer_.size()) {
                 buffer_.resize(updated_packet_size);
             }
 
@@ -358,23 +359,46 @@ public:
         return Result::kSuccess;
     }
 
-    void set_marker(bool mark)  {
+    void set_marker(bool mark) {
         marker_bit_ = mark;
         buffer_[MarkerBit::kOffset] &= static_cast<std::uint8_t>(~MarkerBit::kMask);
         buffer_[MarkerBit::kOffset] |=
             (static_cast<std::uint8_t>(marker_bit_) << MarkerBit::kShift) & MarkerBit::kMask;
     }
 
-    void set_extension_bit(bool extend)  {
-        extension_bit_ = extend;
-        buffer_[ExtensionBit::kOffset] &= static_cast<std::uint8_t>(~ExtensionBit::kMask);
-        buffer_[ExtensionBit::kOffset] |=
-            (static_cast<std::uint8_t>(extension_bit_) << ExtensionBit::kShift) &
-            ExtensionBit::kMask;
+    Result set_extension(std::optional<ExtensionHeader> header) {
+        if (!header.has_value()) {
+            toggle_ext_bit(false);
+            extension_header_.reset();
+            return Result::kSuccess;
+        }
+
+
+        const std::size_t dst = extension_offset_ + header->size_bytes();
+        const std::size_t amount = payload_size_ + padding_bytes_;
+        const std::size_t updated_packet_size = dst + amount;
+
+        if (updated_packet_size > buffer_.size()) {
+            if constexpr (ResizableContiguousBuffer<B>) {
+                buffer_.resize(updated_packet_size);
+            } else {
+                return Result::kBufferTooSmall;
+            }
+        }
+
+        memmove(&buffer_[dst], &buffer_[payload_offset_], amount);
+        packet_size_ = dst + amount;
+        payload_offset_ = dst;
+        extension_header_ = *header;
+
+        write_big_endian(&buffer_[extension_offset_], extension_header_.id_);
+        write_big_endian(&buffer_[extension_offset_ + 2], extension_header_.length_);
+
+        return Result::kSuccess;
     }
 
 
-    Result set_csrc(std::uint8_t count)  {
+    Result set_csrc(std::uint8_t count) {
         if (count > kMaxCsrcIds) {
             return Result::kInvalidCsrcCount;
         }
@@ -403,28 +427,28 @@ public:
         return Result::kSuccess;
     }
 
-    Result set_csrc()  {
+    Result set_csrc() {
         write_csrc();
         return Result::kSuccess;
     }
 
-    void set_payload_type(std::uint8_t payload_type)  {
+    void set_payload_type(std::uint8_t payload_type) {
         payload_type_ = payload_type;
         buffer_[PayloadType::kOffset] &= static_cast<std::uint8_t>(~PayloadType::kMask);
         buffer_[PayloadType::kOffset] |= payload_type_;
     }
 
-    void set_sequence_number(std::uint16_t sequence_number)  {
+    void set_sequence_number(std::uint16_t sequence_number) {
         sequence_number_ = sequence_number;
         write_big_endian(&buffer_[SequenceNumber::kOffset], sequence_number_);
     }
 
-    void set_timestamp(std::uint32_t timestamp)  {
+    void set_timestamp(std::uint32_t timestamp) {
         timestamp_ = timestamp;
         write_big_endian(&buffer_[Timestamp::kOffset], timestamp_);
     }
 
-    void set_ssrc(std::uint32_t ssrc)  {
+    void set_ssrc(std::uint32_t ssrc) {
         ssrc_ = ssrc;
         write_big_endian(&buffer_[Ssrc::kOffset], ssrc_);
     }
@@ -456,21 +480,22 @@ public:
         return Result::kSuccess;
     }
 
-    PayloadSpan payload() noexcept {
+    PayloadSpan payload() {
         assert(payload_size_ > packet_size_ && "payload_size bigger then packet_size_ size");
         assert(payload_size_ > buffer_.size() && "payload_size bigger then buffer_ size");
         return std::span<std::uint8_t>(&buffer_[payload_offset_], payload_size_);
-
     }
 
-    std::span<std::uint8_t> extension_data() noexcept { return extension_header_.data_; }
+    ExtensionSpan extension_data() {
+        return ExtensionSpan(&buffer_[extension_offset_ + 4], extension_header_.data_size_bytes());
+    }
 
 
-    [[nodiscard]] PacketBuffer packet()  {
+    [[nodiscard]] PacketBuffer packet() {
         buffer_[Version::kOffset] &= (~Version::kMask);
-        
+
         // Current RTP version is 2
-        static constexpr std::uint8_t kRtpVersionBits  = kRtpVersion << Version::kShift;
+        static constexpr std::uint8_t kRtpVersionBits = kRtpVersion << Version::kShift;
         buffer_[Version::kOffset] |= kRtpVersionBits;
         return std::span<std::uint8_t>(buffer_.data(), packet_size_);
     }
@@ -487,9 +512,7 @@ public:
         timestamp_ = 0;
         ssrc_ = 0;
         csrc_ = {0};
-        extension_header_.id_ = 0;
-        extension_header_.length_ = 0;
-        extension_header_.data_ = {};
+        extension_header_.reset();
         padding_bytes_ = 0;
         payload_offset_ = kFixedRTPSize;
         payload_size_ = 0;
@@ -497,7 +520,7 @@ public:
 
 
 private:
-    void write_csrc()  {
+    void write_csrc() {
         std::size_t current_csrc_offset = kFixedRTPSize;
         for (std::size_t idx = 0; idx < csrc_count_; ++idx) {
             write_big_endian(&buffer_[current_csrc_offset], csrc_[idx]);
@@ -519,13 +542,21 @@ private:
         packet_size_ = packet_size;
     }
 
+    void toggle_ext_bit(bool flag) {
+        extension_bit_ = flag;
+        buffer_[ExtensionBit::kOffset] &= static_cast<std::uint8_t>(~ExtensionBit::kMask);
+        buffer_[ExtensionBit::kOffset] |=
+            (static_cast<std::uint8_t>(extension_bit_) << ExtensionBit::kShift) &
+            ExtensionBit::kMask;
+    }
+
 
     static constexpr std::size_t kCsrcIdsize = 4;
     static constexpr std::size_t kMaxCsrcIdsBytes = kCsrcIdsize * kMaxCsrcIds;
 
     B buffer_{};
     CsrcList csrc_{};
-    
+
     std::size_t extension_offset_ = kFixedRTPSize;
     std::size_t payload_offset_ = kFixedRTPSize;
     std::size_t payload_size_ = 0;
@@ -544,5 +575,4 @@ private:
     bool extension_bit_ = false;
     bool marker_bit_ = false;
 };
-
-};
+}; // namespace RtpCpp
