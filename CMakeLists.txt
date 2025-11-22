@@ -2,6 +2,14 @@ cmake_minimum_required(VERSION 3.10.0)
 project(rtp VERSION 0.1.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 23)
 
+## Rtp lib
+# TODO allow dynmaic/static linking via option
+# add_library(rtp
+#  src/RtpPacket.cpp)
+
+# target_include_directories(rtp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+
 ## Compiler warnings
 include(cmake/CompilerWarnings.cmake)
 
