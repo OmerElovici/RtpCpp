@@ -2,14 +2,6 @@ cmake_minimum_required(VERSION 3.10.0)
 project(rtp VERSION 0.1.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 23)
 
-## Rtp lib
-# TODO allow dynmaic/static linking via option
-add_library(rtp
- src/RtpPacket.cpp)
-
-target_include_directories(rtp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-
-
 ## Compiler warnings
 include(cmake/CompilerWarnings.cmake)
 
@@ -26,8 +18,8 @@ project_set_project_warnings(
   ""                                                          # CUDA_WARNINGS (defaults)
 )
 
-
-## Sanitizers
+# Couldn't get sanitizers to work on windows, disabling them for now.
+if(NOT WIN32)
 include(cmake/Sanitizers.cmake)
 
 option(ENABLE_SANITIZER_ADDRESS "Enable AddressSanitizer" ON)
@@ -44,7 +36,7 @@ if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
   set(ENABLE_SANITIZER_MEMORY OFF)
 endif()
 
-# Interface to carry sanitizer flags
+#Interface to carry sanitizer flags
 add_library(project_sanitizers INTERFACE)
 
 project_enable_sanitizers(
@@ -56,11 +48,13 @@ project_enable_sanitizers(
     ${ENABLE_SANITIZER_MEMORY}
 )
 
+endif()
+
+
 
 ##Tests
 # add_executable(rtp_test tests/test.cpp)
 
 
 ## Linking
-target_link_libraries(rtp PRIVATE project_sanitizers project_warnings)
 # target_link_libraries(rtp_test PRIVATE rtp project_sanitizers)
