@@ -59,10 +59,14 @@ project_enable_sanitizers(
 endif()
 
 
-
 ##Tests
-# add_executable(rtp_test tests/test.cpp)
+option(RTPCPP_ENABLE_TESTS "Enable tests" ON)
+if(RTPCPP_ENABLE_TESTS)
+    include(third_party/catch2.cmake)
+    add_executable(rtp_test tests/test_rtp.cpp)
+
+    target_link_libraries(rtp_test PRIVATE Catch2::Catch2WithMain)
+    
+endif()
 
 
-## Linking
-# target_link_libraries(rtp_test PRIVATE rtp project_sanitizers)
