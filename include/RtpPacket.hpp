@@ -188,7 +188,7 @@ private:
 
             // Padding amount need to be at least 1 additional octet.
             if (padding_bytes_ == 0) {
-                return Result::kInvalidHeaderLength;
+                return Result::kInvalidRtpHeader;
             }
 
             // Check if padding amount exceed packet size
