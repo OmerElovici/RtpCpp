@@ -188,7 +188,7 @@ private:
 
             // Padding amount need to be at least 1 additional octet.
             if (padding_bytes_ == 0) {
-                return Result::kInvalidHeaderLength;
+                return Result::kInvalidRtpHeader;
             }
 
             // Check if padding amount exceed packet size
@@ -481,8 +481,8 @@ public:
     }
 
     PayloadSpan payload() {
-        assert(payload_size_ > packet_size_ && "payload_size bigger then packet_size_ size");
-        assert(payload_size_ > buffer_.size() && "payload_size bigger then buffer_ size");
+        assert(payload_size_ < packet_size_ && "payload_size bigger then packet_size_ size");
+        assert(payload_size_ < buffer_.size() && "payload_size bigger then buffer_ size");
         return std::span<std::uint8_t>(&buffer_[payload_offset_], payload_size_);
     }
 
