@@ -121,6 +121,14 @@ public:
         requires ResizableContiguousBuffer<B>
         : buffer_(kFixedRTPSize)
         , packet_size_(kFixedRTPSize) {}
+
+    explicit RtpPacket(const B& buffer)
+        : buffer_(buffer){};
+
+    RtpPacket()
+        requires(std::is_same_v<B, std::span<std::uint8_t>>)
+    = delete;
+
     RtpPacket() = default;
 
 
