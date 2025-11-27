@@ -568,7 +568,7 @@ private:
     std::size_t extension_offset_ = kFixedRTPSize;
     std::size_t payload_offset_ = kFixedRTPSize;
     std::size_t payload_size_ = 0;
-    std::size_t packet_size_ = 0;
+    std::size_t packet_size_ = kFixedRTPSize;
 
     // Rtp fields
     std::uint32_t ssrc_ = 0;
