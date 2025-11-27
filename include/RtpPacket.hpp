@@ -345,14 +345,15 @@ public:
                 buffer_.resize(updated_packet_size);
             }
 
-        } else if (padding_bytes > buffer_.size()) {
+        } else if (padding_bytes > buffer_.size() - kFixedRTPSize) {
             return Result::kBufferTooSmall;
         }
 
 
         bool pad_flag = false;
-        if (padding_bytes_ > 0) {
+        if (padding_bytes > 0) {
             pad_flag = true;
+            assert(packet_size_ > padding_bytes_ && "packet_size_ is smaller then padding_bytes_");
             packet_size_ -= padding_bytes_;
             packet_size_ += padding_bytes;
             padding_bytes_ = padding_bytes;
