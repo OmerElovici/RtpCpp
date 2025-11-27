@@ -63,7 +63,7 @@ endif()
 option(RTPCPP_ENABLE_TESTS "Enable tests" ON)
 if(RTPCPP_ENABLE_TESTS)
     include(third_party/catch2.cmake)
-    add_executable(rtp_test tests/test_rtp.cpp)
+    add_executable(rtp_test tests/parse_rtp.cpp)
 
     target_link_libraries(rtp_test PRIVATE Catch2::Catch2WithMain)
     
