@@ -37,7 +37,13 @@ struct ExtensionHeader {
     [[nodiscard]] std::size_t data_size_bytes() const {
         return static_cast<std::size_t>(length_) * 4;
     }
-    [[nodiscard]] std::size_t size_bytes() const { return 4 + data_size_bytes(); }
+    [[nodiscard]] std::size_t size_bytes() const {
+        if (length_ == 0) {
+            return data_size_bytes();
+        } else {
+
+            return  4 + data_size_bytes(); }
+        }
 };
 
 
@@ -121,6 +127,14 @@ public:
         requires ResizableContiguousBuffer<B>
         : buffer_(kFixedRTPSize)
         , packet_size_(kFixedRTPSize) {}
+
+    explicit RtpPacket(const B& buffer)
+        : buffer_(buffer){};
+
+    RtpPacket()
+        requires(std::is_same_v<B, std::span<std::uint8_t>>)
+    = delete;
+
     RtpPacket() = default;
 
 
@@ -337,14 +351,15 @@ public:
                 buffer_.resize(updated_packet_size);
             }
 
-        } else if (padding_bytes > buffer_.size()) {
+        } else if (padding_bytes > buffer_.size() - kFixedRTPSize) {
             return Result::kBufferTooSmall;
         }
 
 
         bool pad_flag = false;
-        if (padding_bytes_ > 0) {
+        if (padding_bytes > 0) {
             pad_flag = true;
+            assert(packet_size_ > padding_bytes_ && "packet_size_ is smaller then padding_bytes_");
             packet_size_ -= padding_bytes_;
             packet_size_ += padding_bytes;
             padding_bytes_ = padding_bytes;
@@ -393,6 +408,7 @@ public:
 
         write_big_endian(&buffer_[extension_offset_], extension_header_.id_);
         write_big_endian(&buffer_[extension_offset_ + 2], extension_header_.length_);
+        toggle_ext_bit(true);
 
         return Result::kSuccess;
     }
@@ -419,6 +435,10 @@ public:
         packet_size_ = packet_size_ - (static_cast<std::size_t>(csrc_count_) * 4) +
                        (static_cast<std::size_t>(count) * 4);
         csrc_count_ = count;
+
+        extension_offset_ = upcoming_csrc_offset;
+        payload_offset_ = upcoming_csrc_offset + extension_header_.size_bytes();
+        
 
         buffer_[CsrcCount::kOffset] &= (~CsrcCount::kMask);
         buffer_[CsrcCount::kOffset] |= (csrc_count_ & CsrcCount::kMask);
@@ -560,7 +580,7 @@ private:
     std::size_t extension_offset_ = kFixedRTPSize;
     std::size_t payload_offset_ = kFixedRTPSize;
     std::size_t payload_size_ = 0;
-    std::size_t packet_size_ = 0;
+    std::size_t packet_size_ = kFixedRTPSize;
 
     // Rtp fields
     std::uint32_t ssrc_ = 0;
