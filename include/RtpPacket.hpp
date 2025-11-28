@@ -402,6 +402,7 @@ public:
 
         write_big_endian(&buffer_[extension_offset_], extension_header_.id_);
         write_big_endian(&buffer_[extension_offset_ + 2], extension_header_.length_);
+        toggle_ext_bit(true);
 
         return Result::kSuccess;
     }
