@@ -14,19 +14,31 @@ using namespace RtpCpp;
 // NOLINTBEGIN(cppcoreguidelines-avoid-do-while, readability-function-cognitive-complexity,
 // cert-err58-cpp)
 
+template <typename RtpPacketType>
+auto create_packet_buff() {
+    if constexpr (std::is_same_v<RtpPacketType, RtpPacket<std::vector<std::uint8_t>>>) {
+        return std::vector<std::uint8_t>(200);
+    } else {
+        return std::array<std::uint8_t, 200>{};
+    }
+}
 
 TEMPLATE_TEST_CASE(
-    "Modify RTP packet data with static buffer",
+    "Setting rtp packet data values",
     "[RtpPacket]",
     (RtpPacket<std::array<std::uint8_t, 200>>),
-    (RtpPacket<std::span<std::uint8_t>>)) {
-    std::array<std::uint8_t, 200> buff{};
+    (RtpPacket<std::span<std::uint8_t>>),
+    (RtpPacket<std::vector<std::uint8_t>>)) {
+
+    using RtpPacketVecType = RtpPacket<std::vector<std::uint8_t>>;
+    auto buff = create_packet_buff<TestType>();
 
     TestType pkt{buff};
     std::size_t pkt_size = pkt.packet().size();
     REQUIRE(pkt_size == 12);
 
     SECTION("Set Csrc") {
+
         REQUIRE(pkt.set_csrc(0) == Result::kSuccess);
         REQUIRE(pkt.set_csrc(15) == Result::kSuccess);
         REQUIRE(pkt.set_csrc(16) == Result::kInvalidCsrcCount);
@@ -34,30 +46,94 @@ TEMPLATE_TEST_CASE(
         REQUIRE(pkt.packet().size() == kMaxCsrcRtpPacket);
     }
 
+
+    // This shouldnt be here since buffer size in this test case is always big enough
+    // but left for completeness
+    SECTION("Set csrc (when buffer too small)") {
+        std::array<std::uint8_t, 32> small_buff{};
+        RtpPacket<std::array<std::uint8_t, 32>> small_pkt{small_buff};
+        RtpPacket<std::span<std::uint8_t>> small_pkt_span{small_buff};
+        RtpPacket<std::vector<std::uint8_t>> small_pkt_vec{};
+
+        REQUIRE(small_pkt.set_csrc(6) == Result::kBufferTooSmall);
+        REQUIRE(small_pkt_span.set_csrc(6) == Result::kBufferTooSmall);
+        // REQUIRE(small_pkt_vec.set_csrc(6) == Result::kSuccess);
+
+    }
+
     SECTION("Set Padding") {
-        REQUIRE(pkt.set_padding_bytes(0) == Result::kSuccess);
-        REQUIRE(pkt.set_padding_bytes(100) == Result::kSuccess);
-        REQUIRE(pkt.set_padding_bytes(200) == Result::kBufferTooSmall);
-        REQUIRE(pkt_size + 100 == pkt.packet().size());
+        std::size_t padding_size = 0;
+        REQUIRE(pkt.set_padding_bytes(padding_size) == Result::kSuccess);
+
+        padding_size = 100;
+        REQUIRE(pkt.set_padding_bytes(padding_size) == Result::kSuccess);
+
+        padding_size = 200;
+        if constexpr (std::same_as<TestType, RtpPacketVecType>) {
+            REQUIRE(pkt.set_padding_bytes(padding_size) == Result::kSuccess);
+        } else {
+            // Should not change buffer size
+            REQUIRE(pkt.set_padding_bytes(padding_size) == Result::kBufferTooSmall);
+            padding_size = 100;
+        }
+
+        REQUIRE(pkt_size + padding_size == pkt.packet().size());
     }
 
     SECTION("Set Extension") {
-        auto valid_header = ExtensionHeader{.id_ = 3, .length_ = 2};
-        REQUIRE(pkt.set_extension(valid_header) == Result::kSuccess);
+        REQUIRE(pkt.set_extension({}) == Result::kSuccess);
 
-        auto invalid_header = ExtensionHeader{.id_ = 4, .length_ = 200};
-        REQUIRE(pkt.set_extension(invalid_header) == Result::kBufferTooSmall);
+        auto header = ExtensionHeader{.id_ = 3, .length_ = 2};
+        REQUIRE(pkt.set_extension(header) == Result::kSuccess);
 
-        REQUIRE(pkt.packet().size() == pkt_size + valid_header.size_bytes());
+        header = ExtensionHeader{.id_ = 4, .length_ = 200};
+        if constexpr (std::same_as<TestType, RtpPacketVecType>) {
+            REQUIRE(pkt.set_extension(header) == Result::kSuccess);
+        } else {
+            // Should not change buffer size
+            REQUIRE(pkt.set_extension(header) == Result::kBufferTooSmall);
+            header = ExtensionHeader{.id_ = 3, .length_ = 2};
+        }
+
+        REQUIRE(pkt.packet().size() == pkt_size + header.size_bytes());
     }
 
     SECTION("Set Payload size") {
-        REQUIRE(pkt.set_payload_size(0) == Result::kSuccess);
-        REQUIRE(pkt.set_payload_size(160) == Result::kSuccess);
-        REQUIRE(pkt.set_payload_size(220) == Result::kBufferTooSmall);
+        std::size_t payload_size = 0;
+        REQUIRE(pkt.set_payload_size(payload_size) == Result::kSuccess);
 
-        REQUIRE(pkt_size + 160 == pkt.packet().size());
+        payload_size = 160;
+        REQUIRE(pkt.set_payload_size(payload_size) == Result::kSuccess);
+
+        payload_size = 220;
+        if constexpr (std::same_as<TestType, RtpPacketVecType>) {
+            REQUIRE(pkt.set_payload_size(payload_size) == Result::kSuccess);
+        } else {
+            // Should not change buffer size
+            REQUIRE(pkt.set_payload_size(payload_size) == Result::kBufferTooSmall);
+            payload_size = 160;
+        }
+
+        REQUIRE(pkt_size + payload_size == pkt.packet().size());
     }
+}
+
+
+
+
+TEMPLATE_TEST_CASE(
+    "Modify RTP packet data with static buffer",
+    "[RtpPacket]",
+    (RtpPacket<std::array<std::uint8_t, 200>>),
+    (RtpPacket<std::span<std::uint8_t>>),
+    (RtpPacket<std::vector<std::uint8_t>>)) {
+
+    auto buff = create_packet_buff<TestType>();
+
+    TestType pkt{buff};
+    std::size_t pkt_size = pkt.packet().size();
+    REQUIRE(pkt_size == 12);
+
 
     SECTION("Write fixed values to buffer") {
         REQUIRE(pkt.set_payload_size(160) == Result::kSuccess);
