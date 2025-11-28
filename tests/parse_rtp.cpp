@@ -41,7 +41,7 @@ TEST_CASE("Parse RTP packets from buffer", "[RtpPacket]") {
         check_fields(vec_pkt, __FILE__, __LINE__);
 
         // Span buffer
-        RtpPacket<std::span<std::uint8_t>> span_pkt;
+        RtpPacket<std::span<std::uint8_t>> span_pkt{{}};
         auto arr_buffer = RtpSamples::g711_pcma;
         REQUIRE(span_pkt.parse({arr_buffer}) == Result::kSuccess);
         check_fields(span_pkt, __FILE__, __LINE__);
@@ -93,7 +93,7 @@ TEST_CASE("Parse RTP packets from buffer", "[RtpPacket]") {
         check_fields(vec_pkt, __FILE__, __LINE__);
 
         // Span buffer
-        RtpPacket<std::span<std::uint8_t>> span_pkt;
+        RtpPacket<std::span<std::uint8_t>> span_pkt{{}};
         auto arr_buffer = RtpSamples::all_enabled;
         REQUIRE(span_pkt.parse({arr_buffer}) == Result::kSuccess);
         check_fields(span_pkt, __FILE__, __LINE__);
