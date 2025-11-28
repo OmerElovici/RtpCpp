@@ -37,7 +37,13 @@ struct ExtensionHeader {
     [[nodiscard]] std::size_t data_size_bytes() const {
         return static_cast<std::size_t>(length_) * 4;
     }
-    [[nodiscard]] std::size_t size_bytes() const { return 4 + data_size_bytes(); }
+    [[nodiscard]] std::size_t size_bytes() const {
+        if (length_ == 0) {
+            return data_size_bytes();
+        } else {
+
+            return  4 + data_size_bytes(); }
+        }
 };
 
 
@@ -429,6 +435,10 @@ public:
         packet_size_ = packet_size_ - (static_cast<std::size_t>(csrc_count_) * 4) +
                        (static_cast<std::size_t>(count) * 4);
         csrc_count_ = count;
+
+        extension_offset_ = upcoming_csrc_offset;
+        payload_offset_ = upcoming_csrc_offset + extension_header_.size_bytes();
+        
 
         buffer_[CsrcCount::kOffset] &= (~CsrcCount::kMask);
         buffer_[CsrcCount::kOffset] |= (csrc_count_ & CsrcCount::kMask);
