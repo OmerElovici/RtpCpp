@@ -37,13 +37,7 @@ struct ExtensionHeader {
     [[nodiscard]] std::size_t data_size_bytes() const {
         return static_cast<std::size_t>(length_) * 4;
     }
-    [[nodiscard]] std::size_t size_bytes() const {
-        if (length_ == 0) {
-            return data_size_bytes();
-        } else {
-            return 4 + data_size_bytes();
-        }
-    }
+    [[nodiscard]] std::size_t size_bytes() const { return 4 + data_size_bytes(); }
 };
 
 
@@ -422,7 +416,8 @@ public:
 
         // std::size_t csrc_end = kFixedRTPSize + (kCsrcIdsize * csrc_count_);
         const std::size_t dst = kFixedRTPSize + (kCsrcIdsize * count);
-        const std::size_t amount = payload_size_ + padding_bytes_ + extension_header_.size_bytes();
+        const std::size_t ext_size = current_ext_size_bytes();
+        const std::size_t amount = payload_size_ + padding_bytes_ + ext_size;
         const std::size_t updated_packet_size = dst + amount;
 
         if (updated_packet_size > buffer_.size()) {
@@ -440,7 +435,7 @@ public:
         //                (static_cast<std::size_t>(count) * 4);
         csrc_count_ = count;
         extension_offset_ = dst;
-        payload_offset_ = dst + extension_header_.size_bytes();
+        payload_offset_ = dst + ext_size;
         packet_size_ = updated_packet_size;
 
 
@@ -572,6 +567,13 @@ private:
         buffer_[ExtensionBit::kOffset] |=
             (static_cast<std::uint8_t>(extension_bit_) << ExtensionBit::kShift) &
             ExtensionBit::kMask;
+    }
+
+    [[nodiscard]] std::size_t current_ext_size_bytes() const noexcept {
+        if (extension_bit_) {
+            return extension_header_.size_bytes();
+        }
+        return 0;
     }
 
 
