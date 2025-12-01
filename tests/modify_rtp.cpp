@@ -29,7 +29,6 @@ TEMPLATE_TEST_CASE(
     (RtpPacket<std::array<std::uint8_t, 200>>),
     (RtpPacket<std::span<std::uint8_t>>),
     (RtpPacket<std::vector<std::uint8_t>>)) {
-
     using RtpPacketVecType = RtpPacket<std::vector<std::uint8_t>>;
     auto buff = create_packet_buff<TestType>();
 
@@ -38,7 +37,6 @@ TEMPLATE_TEST_CASE(
     REQUIRE(pkt_size == 12);
 
     SECTION("Set Csrc") {
-
         REQUIRE(pkt.set_csrc(0) == Result::kSuccess);
         REQUIRE(pkt.set_csrc(15) == Result::kSuccess);
         REQUIRE(pkt.set_csrc(16) == Result::kInvalidCsrcCount);
@@ -55,10 +53,12 @@ TEMPLATE_TEST_CASE(
         RtpPacket<std::span<std::uint8_t>> small_pkt_span{small_buff};
         RtpPacket<std::vector<std::uint8_t>> small_pkt_vec{};
 
-        REQUIRE(small_pkt.set_csrc(6) == Result::kBufferTooSmall);
-        REQUIRE(small_pkt_span.set_csrc(6) == Result::kBufferTooSmall);
-        // REQUIRE(small_pkt_vec.set_csrc(6) == Result::kSuccess);
-
+        if constexpr (std::same_as<TestType, RtpPacketVecType>) {
+            REQUIRE(small_pkt_vec.set_csrc(6) == Result::kSuccess);
+        } else {
+            REQUIRE(small_pkt.set_csrc(6) == Result::kBufferTooSmall);
+            REQUIRE(small_pkt_span.set_csrc(6) == Result::kBufferTooSmall);
+        }
     }
 
     SECTION("Set Padding") {
@@ -119,15 +119,12 @@ TEMPLATE_TEST_CASE(
 }
 
 
-
-
 TEMPLATE_TEST_CASE(
     "Modify RTP packet data with static buffer",
     "[RtpPacket]",
     (RtpPacket<std::array<std::uint8_t, 200>>),
     (RtpPacket<std::span<std::uint8_t>>),
     (RtpPacket<std::vector<std::uint8_t>>)) {
-
     auto buff = create_packet_buff<TestType>();
 
     TestType pkt{buff};

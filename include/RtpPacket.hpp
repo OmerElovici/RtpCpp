@@ -41,9 +41,9 @@ struct ExtensionHeader {
         if (length_ == 0) {
             return data_size_bytes();
         } else {
-
-            return  4 + data_size_bytes(); }
+            return 4 + data_size_bytes();
         }
+    }
 };
 
 
@@ -421,24 +421,28 @@ public:
 
 
         // std::size_t csrc_end = kFixedRTPSize + (kCsrcIdsize * csrc_count_);
-        const std::size_t current_csrc_offset = kFixedRTPSize + (kCsrcIdsize * csrc_count_);
-        const std::size_t upcoming_csrc_offset = kFixedRTPSize + (kCsrcIdsize * count);
-        const std::size_t amount = packet_size_ - current_csrc_offset;
+        const std::size_t dst = kFixedRTPSize + (kCsrcIdsize * count);
+        const std::size_t amount = payload_size_ + padding_bytes_ + extension_header_.size_bytes();
+        const std::size_t updated_packet_size = dst + amount;
 
-        if (upcoming_csrc_offset + amount > buffer_.size()) {
-            return Result::kBufferTooSmall;
+        if (updated_packet_size > buffer_.size()) {
+            if constexpr (ResizableContiguousBuffer<B>) {
+                buffer_.resize(updated_packet_size);
+            } else {
+                return Result::kBufferTooSmall;
+            }
         }
 
 
-        std::memmove(&buffer_[upcoming_csrc_offset], &buffer_[current_csrc_offset], amount);
+        std::memmove(&buffer_[dst], &buffer_[extension_offset_], amount);
 
-        packet_size_ = packet_size_ - (static_cast<std::size_t>(csrc_count_) * 4) +
-                       (static_cast<std::size_t>(count) * 4);
+        // packet_size_ = packet_size_ - (static_cast<std::size_t>(csrc_count_) * 4) +
+        //                (static_cast<std::size_t>(count) * 4);
         csrc_count_ = count;
+        extension_offset_ = dst;
+        payload_offset_ = dst + extension_header_.size_bytes();
+        packet_size_ = updated_packet_size;
 
-        extension_offset_ = upcoming_csrc_offset;
-        payload_offset_ = upcoming_csrc_offset + extension_header_.size_bytes();
-        
 
         buffer_[CsrcCount::kOffset] &= (~CsrcCount::kMask);
         buffer_[CsrcCount::kOffset] |= (csrc_count_ & CsrcCount::kMask);
